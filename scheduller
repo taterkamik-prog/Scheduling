@@ -1,0 +1,1231 @@
+import java.io.*;
+import java.util.*;
+
+/* ============================================================
+ * PROGRAM ENTRY POINT
+ * ============================================================
+ * This program manages:
+ * - Organization Structure (Wing -> Group -> Squadron -> Section)
+ * - Employee Records
+ * - Section Membership (employees can be in multiple sections)
+ * - Additional Duties (duties are defined per section and assigned to employees)
+ * - Assigned Raters (an employee can have a rater who is another employee)
+ * - Saving/Loading to CSV files
+ */
+public class Main {
+
+    // ------------------------------------------------------------
+    // main()
+    // ------------------------------------------------------------
+    // - Loads all data from CSV files
+    // - Runs the menu loop
+    // - Saves data on request
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+
+        Store store = new Store();
+        store.loadAll();
+
+        while (true) {
+            System.out.println("\n=== MAIN MENU ===");
+            System.out.println("1) Organization");
+            System.out.println("2) Employees");
+            System.out.println("3) Additional Duties (by Section)");
+            System.out.println("4) Save");
+            System.out.println("5) Save & Exit");
+
+            int choice = Input.readInt(sc, "Choice: ", 1, 5);
+
+            if (choice == 1) {
+                Menus.organization(sc, store);
+            } else if (choice == 2) {
+                Menus.employees(sc, store);
+            } else if (choice == 3) {
+                Menus.duties(sc, store);
+            } else if (choice == 4) {
+                store.saveAll();
+                System.out.println("Saved.");
+            } else {
+                store.saveAll();
+                System.out.println("Saved. Exiting.");
+                break;
+            }
+        }
+
+        sc.close();
+    }
+}
+
+/* ============================================================
+ * INPUT HELPERS
+ * ============================================================
+ * These methods protect the program from most common input mistakes:
+ * - Empty strings
+ * - Non-numeric values where numbers are expected
+ * - Bad enum values
+ */
+class Input {
+
+    // ------------------------------------------------------------
+    // readLine()
+    // ------------------------------------------------------------
+    // - Reads a raw line from the user
+    // - Trims the result
+    static String readLine(Scanner sc, String prompt) {
+        System.out.print(prompt);
+        return sc.nextLine().trim();
+    }
+
+    // ------------------------------------------------------------
+    // readText()
+    // ------------------------------------------------------------
+    // - Reads general text from the user
+    // - Replaces CSV-breaking characters so saving/loading stays stable
+    static String readText(Scanner sc, String prompt) {
+        String s = readLine(sc, prompt);
+        return Store.clean(s);
+    }
+
+    // ------------------------------------------------------------
+    // readId()
+    // ------------------------------------------------------------
+    // - Reads an ID field (Wing/Group/etc.)
+    // - Removes spaces and makes uppercase so matching is consistent
+    static String readId(Scanner sc, String prompt) {
+        while (true) {
+            String s = readLine(sc, prompt).replace(" ", "").toUpperCase();
+            s = Store.clean(s);
+            if (!s.isEmpty()) {
+                return s;
+            }
+            System.out.println("ERROR: ID cannot be blank.");
+        }
+    }
+
+    // ------------------------------------------------------------
+    // readOptionalId()
+    // ------------------------------------------------------------
+    // - Reads an ID that can be blank (used for unassigning)
+    static String readOptionalId(Scanner sc, String prompt) {
+        String s = readLine(sc, prompt).replace(" ", "").toUpperCase();
+        return Store.clean(s);
+    }
+
+    // ------------------------------------------------------------
+    // readInt()
+    // ------------------------------------------------------------
+    // - Reads a whole number safely
+    // - Keeps the user in the same menu until a valid number is entered
+    static int readInt(Scanner sc, String prompt, int min, int max) {
+        while (true) {
+            String s = readLine(sc, prompt);
+            try {
+                int v = Integer.parseInt(s);
+                if (v < min || v > max) {
+                    System.out.println("ERROR: Enter a number from " + min + " to " + max + ".");
+                    continue;
+                }
+                return v;
+            } catch (Exception ex) {
+                System.out.println("ERROR: Enter a valid whole number.");
+            }
+        }
+    }
+
+    // ------------------------------------------------------------
+    // readEmploymentType()
+    // ------------------------------------------------------------
+    // - Reads FULL_TIME or TRADITIONAL safely
+    static EmploymentType readEmploymentType(Scanner sc, String prompt) {
+        while (true) {
+            String s = readLine(sc, prompt).toUpperCase();
+            if (s.equals("FULL_TIME")) return EmploymentType.FULL_TIME;
+            if (s.equals("TRADITIONAL")) return EmploymentType.TRADITIONAL;
+            System.out.println("ERROR: Enter FULL_TIME or TRADITIONAL.");
+        }
+    }
+}
+
+/* ============================================================
+ * MENU CONTROLLER
+ * ============================================================
+ * Each menu is a loop.
+ * After any action finishes, it returns to the same menu.
+ */
+class Menus {
+
+    /* ============================================================
+     * ORGANIZATION MENU
+     * ============================================================
+     * - Create / edit / delete Wings, Groups, Squadrons, Sections
+     * - Assign relationships (Group->Wing, Squadron->Group, Section->Squadron)
+     */
+    static void organization(Scanner sc, Store st) {
+        while (true) {
+            System.out.println("\n--- ORGANIZATION ---");
+            System.out.println("1) Create Wing");
+            System.out.println("2) Create Group");
+            System.out.println("3) Create Squadron");
+            System.out.println("4) Create Section");
+            System.out.println("5) Edit Wing Name");
+            System.out.println("6) Edit Group Name");
+            System.out.println("7) Edit Squadron Name");
+            System.out.println("8) Edit Section Name");
+            System.out.println("9) Delete Wing");
+            System.out.println("10) Delete Group");
+            System.out.println("11) Delete Squadron");
+            System.out.println("12) Delete Section");
+            System.out.println("13) Assign Group -> Wing");
+            System.out.println("14) Assign Squadron -> Group");
+            System.out.println("15) Assign Section -> Squadron");
+            System.out.println("16) List All");
+            System.out.println("17) Back");
+
+            int c = Input.readInt(sc, "Choice: ", 1, 17);
+
+            if (c == 1) createWing(sc, st);
+            else if (c == 2) createGroup(sc, st);
+            else if (c == 3) createSquadron(sc, st);
+            else if (c == 4) createSection(sc, st);
+            else if (c == 5) editWing(sc, st);
+            else if (c == 6) editGroup(sc, st);
+            else if (c == 7) editSquadron(sc, st);
+            else if (c == 8) editSection(sc, st);
+            else if (c == 9) deleteWing(sc, st);
+            else if (c == 10) deleteGroup(sc, st);
+            else if (c == 11) deleteSquadron(sc, st);
+            else if (c == 12) deleteSection(sc, st);
+            else if (c == 13) assignGroupToWing(sc, st);
+            else if (c == 14) assignSquadronToGroup(sc, st);
+            else if (c == 15) assignSectionToSquadron(sc, st);
+            else if (c == 16) listOrg(st);
+            else return;
+        }
+    }
+
+    /* ============================================================
+     * EMPLOYEE MENU
+     * ============================================================
+     * - Create / edit / delete employees
+     * - View employee details (sections, duties, rater)
+     * - Assign employees to multiple sections
+     * - Assign duties to employees (per section)
+     * - Set/clear rater
+     */
+    static void employees(Scanner sc, Store st) {
+        while (true) {
+            System.out.println("\n--- EMPLOYEES ---");
+            System.out.println("1) Add Employee");
+            System.out.println("2) Edit Employee");
+            System.out.println("3) Delete Employee");
+            System.out.println("4) List Employees");
+            System.out.println("5) View Employee Details");
+            System.out.println("6) Assign Employee to Section");
+            System.out.println("7) Remove Employee from Section");
+            System.out.println("8) Assign Additional Duty (Employee)");
+            System.out.println("9) Remove Additional Duty (Employee)");
+            System.out.println("10) Set/Clear Assigned Rater");
+            System.out.println("11) Back");
+
+            int c = Input.readInt(sc, "Choice: ", 1, 11);
+
+            if (c == 1) addEmployee(sc, st);
+            else if (c == 2) editEmployee(sc, st);
+            else if (c == 3) deleteEmployee(sc, st);
+            else if (c == 4) listEmployees(st);
+            else if (c == 5) viewEmployeeDetails(sc, st);
+            else if (c == 6) assignEmpToSection(sc, st);
+            else if (c == 7) removeEmpFromSection(sc, st);
+            else if (c == 8) assignDutyToEmployee(sc, st);
+            else if (c == 9) removeDutyFromEmployee(sc, st);
+            else if (c == 10) setRater(sc, st);
+            else return;
+        }
+    }
+
+    /* ============================================================
+     * ADDITIONAL DUTIES MENU
+     * ============================================================
+     * - Duties are stored inside each Section
+     * - Employees can only be assigned duties that exist in their section
+     */
+    static void duties(Scanner sc, Store st) {
+        while (true) {
+            System.out.println("\n--- ADDITIONAL DUTIES (BY SECTION) ---");
+            System.out.println("1) View Duties for Section");
+            System.out.println("2) Add Duty to Section");
+            System.out.println("3) Rename Duty in Section");
+            System.out.println("4) Delete Duty from Section");
+            System.out.println("5) Back");
+
+            int c = Input.readInt(sc, "Choice: ", 1, 5);
+
+            if (c == 1) viewSectionDuties(sc, st);
+            else if (c == 2) addDutyToSection(sc, st);
+            else if (c == 3) renameDutyInSection(sc, st);
+            else if (c == 4) deleteDutyFromSection(sc, st);
+            else return;
+        }
+    }
+
+    // ============================================================
+    // ORGANIZATION: CREATE
+    // ============================================================
+
+    static void createWing(Scanner sc, Store st) {
+        String id = Input.readId(sc, "Wing ID: ");
+        if (st.findWing(id) != null) { System.out.println("ERROR: Wing ID exists."); return; }
+
+        String name = Input.readText(sc, "Wing Name: ");
+        st.wings.add(new Wing(id, name));
+        System.out.println("SUCCESS.");
+    }
+
+    static void createGroup(Scanner sc, Store st) {
+        String id = Input.readId(sc, "Group ID: ");
+        if (st.findGroup(id) != null) { System.out.println("ERROR: Group ID exists."); return; }
+
+        String name = Input.readText(sc, "Group Name: ");
+        st.groups.add(new Group(id, name));
+        System.out.println("SUCCESS.");
+    }
+
+    static void createSquadron(Scanner sc, Store st) {
+        String id = Input.readId(sc, "Squadron ID: ");
+        if (st.findSquadron(id) != null) { System.out.println("ERROR: Squadron ID exists."); return; }
+
+        String name = Input.readText(sc, "Squadron Name: ");
+        st.squadrons.add(new Squadron(id, name));
+        System.out.println("SUCCESS.");
+    }
+
+    static void createSection(Scanner sc, Store st) {
+        String id = Input.readId(sc, "Section ID: ");
+        if (st.findSection(id) != null) { System.out.println("ERROR: Section ID exists."); return; }
+
+        String name = Input.readText(sc, "Section Name: ");
+        st.sections.add(new Section(id, name));
+        System.out.println("SUCCESS.");
+    }
+
+    // ============================================================
+    // ORGANIZATION: EDIT
+    // ============================================================
+
+    static void editWing(Scanner sc, Store st) {
+        listWings(st);
+        String id = Input.readId(sc, "Wing ID: ");
+        Wing w = st.findWing(id);
+        if (w == null) { System.out.println("ERROR: Wing not found."); return; }
+
+        w.name = Input.readText(sc, "New Name: ");
+        System.out.println("SUCCESS.");
+    }
+
+    static void editGroup(Scanner sc, Store st) {
+        listGroups(st);
+        String id = Input.readId(sc, "Group ID: ");
+        Group g = st.findGroup(id);
+        if (g == null) { System.out.println("ERROR: Group not found."); return; }
+
+        g.name = Input.readText(sc, "New Name: ");
+        System.out.println("SUCCESS.");
+    }
+
+    static void editSquadron(Scanner sc, Store st) {
+        listSquadrons(st);
+        String id = Input.readId(sc, "Squadron ID: ");
+        Squadron s = st.findSquadron(id);
+        if (s == null) { System.out.println("ERROR: Squadron not found."); return; }
+
+        s.name = Input.readText(sc, "New Name: ");
+        System.out.println("SUCCESS.");
+    }
+
+    static void editSection(Scanner sc, Store st) {
+        listSections(st);
+        String id = Input.readId(sc, "Section ID: ");
+        Section s = st.findSection(id);
+        if (s == null) { System.out.println("ERROR: Section not found."); return; }
+
+        s.name = Input.readText(sc, "New Name: ");
+        System.out.println("SUCCESS.");
+    }
+
+    // ============================================================
+    // ORGANIZATION: DELETE
+    // ============================================================
+
+    static void deleteWing(Scanner sc, Store st) {
+        listWings(st);
+        String id = Input.readId(sc, "Wing ID: ");
+        Wing w = st.findWing(id);
+        if (w == null) { System.out.println("ERROR: Wing not found."); return; }
+
+        // notes: Unassign children so data stays consistent
+        for (Group g : st.groups) if (g.wingId.equalsIgnoreCase(id)) g.wingId = "";
+        st.wings.remove(w);
+
+        System.out.println("SUCCESS: Deleted. Groups unassigned.");
+    }
+
+    static void deleteGroup(Scanner sc, Store st) {
+        listGroups(st);
+        String id = Input.readId(sc, "Group ID: ");
+        Group g = st.findGroup(id);
+        if (g == null) { System.out.println("ERROR: Group not found."); return; }
+
+        // notes: Unassign children so data stays consistent
+        for (Squadron sq : st.squadrons) if (sq.groupId.equalsIgnoreCase(id)) sq.groupId = "";
+        st.groups.remove(g);
+
+        System.out.println("SUCCESS: Deleted. Squadrons unassigned.");
+    }
+
+    static void deleteSquadron(Scanner sc, Store st) {
+        listSquadrons(st);
+        String id = Input.readId(sc, "Squadron ID: ");
+        Squadron s = st.findSquadron(id);
+        if (s == null) { System.out.println("ERROR: Squadron not found."); return; }
+
+        // notes: Unassign children so data stays consistent
+        for (Section sec : st.sections) if (sec.squadronId.equalsIgnoreCase(id)) sec.squadronId = "";
+        st.squadrons.remove(s);
+
+        System.out.println("SUCCESS: Deleted. Sections unassigned.");
+    }
+
+    static void deleteSection(Scanner sc, Store st) {
+        listSections(st);
+        String id = Input.readId(sc, "Section ID: ");
+        Section sec = st.findSection(id);
+        if (sec == null) { System.out.println("ERROR: Section not found."); return; }
+
+        // notes: If a section is deleted, remove memberships and duty assignments tied to that section
+        for (Employee e : st.employees) {
+            e.sectionIds.removeIf(sid -> sid.equalsIgnoreCase(id));
+            e.dutyAssignments.removeIf(a -> a.sectionId.equalsIgnoreCase(id));
+        }
+
+        st.sections.remove(sec);
+        System.out.println("SUCCESS: Deleted. Employee memberships/duties removed.");
+    }
+
+    // ============================================================
+    // ORGANIZATION: ASSIGN RELATIONSHIPS
+    // ============================================================
+
+    static void assignGroupToWing(Scanner sc, Store st) {
+        listGroups(st);
+        String gid = Input.readId(sc, "Group ID: ");
+        Group g = st.findGroup(gid);
+        if (g == null) { System.out.println("ERROR: Group not found."); return; }
+
+        listWings(st);
+        String wid = Input.readOptionalId(sc, "Wing ID (blank to unassign): ");
+
+        if (wid.isEmpty()) { g.wingId = ""; System.out.println("SUCCESS: Unassigned."); return; }
+
+        Wing w = st.findWing(wid);
+        if (w == null) { System.out.println("ERROR: Wing not found."); return; }
+
+        g.wingId = w.wingId;
+        System.out.println("SUCCESS.");
+    }
+
+    static void assignSquadronToGroup(Scanner sc, Store st) {
+        listSquadrons(st);
+        String sid = Input.readId(sc, "Squadron ID: ");
+        Squadron sq = st.findSquadron(sid);
+        if (sq == null) { System.out.println("ERROR: Squadron not found."); return; }
+
+        listGroups(st);
+        String gid = Input.readOptionalId(sc, "Group ID (blank to unassign): ");
+
+        if (gid.isEmpty()) { sq.groupId = ""; System.out.println("SUCCESS: Unassigned."); return; }
+
+        Group g = st.findGroup(gid);
+        if (g == null) { System.out.println("ERROR: Group not found."); return; }
+
+        sq.groupId = g.groupId;
+        System.out.println("SUCCESS.");
+    }
+
+    static void assignSectionToSquadron(Scanner sc, Store st) {
+        listSections(st);
+        String secId = Input.readId(sc, "Section ID: ");
+        Section sec = st.findSection(secId);
+        if (sec == null) { System.out.println("ERROR: Section not found."); return; }
+
+        listSquadrons(st);
+        String sqId = Input.readOptionalId(sc, "Squadron ID (blank to unassign): ");
+
+        if (sqId.isEmpty()) { sec.squadronId = ""; System.out.println("SUCCESS: Unassigned."); return; }
+
+        Squadron sq = st.findSquadron(sqId);
+        if (sq == null) { System.out.println("ERROR: Squadron not found."); return; }
+
+        sec.squadronId = sq.squadronId;
+        System.out.println("SUCCESS.");
+    }
+
+    // ============================================================
+    // ORGANIZATION: LIST HELPERS
+    // ============================================================
+
+    static void listOrg(Store st) {
+        System.out.println("\nWINGS"); listWings(st);
+        System.out.println("\nGROUPS"); listGroups(st);
+        System.out.println("\nSQUADRONS"); listSquadrons(st);
+        System.out.println("\nSECTIONS"); listSections(st);
+    }
+
+    static void listWings(Store st) {
+        if (st.wings.isEmpty()) { System.out.println("(None)"); return; }
+        for (Wing w : st.wings) System.out.println(w.wingId + " | " + w.name);
+    }
+
+    static void listGroups(Store st) {
+        if (st.groups.isEmpty()) { System.out.println("(None)"); return; }
+        for (Group g : st.groups) {
+            System.out.println(g.groupId + " | " + g.name + " | Wing: " +
+                    (g.wingId.isEmpty() ? "UNASSIGNED" : g.wingId));
+        }
+    }
+
+    static void listSquadrons(Store st) {
+        if (st.squadrons.isEmpty()) { System.out.println("(None)"); return; }
+        for (Squadron s : st.squadrons) {
+            System.out.println(s.squadronId + " | " + s.name + " | Group: " +
+                    (s.groupId.isEmpty() ? "UNASSIGNED" : s.groupId));
+        }
+    }
+
+    static void listSections(Store st) {
+        if (st.sections.isEmpty()) { System.out.println("(None)"); return; }
+        for (Section s : st.sections) {
+            System.out.println(s.sectionId + " | " + s.name + " | Squadron: " +
+                    (s.squadronId.isEmpty() ? "UNASSIGNED" : s.squadronId));
+        }
+    }
+
+    // ============================================================
+    // EMPLOYEES: CREATE/EDIT/DELETE/LIST
+    // ============================================================
+
+    static void addEmployee(Scanner sc, Store st) {
+        String id = Input.readId(sc, "Employee ID: ");
+        if (st.findEmployee(id) != null) { System.out.println("ERROR: Employee ID exists."); return; }
+
+        Employee e = new Employee(id);
+
+        e.rank = Input.readText(sc, "Rank: ");
+        e.firstName = Input.readText(sc, "First Name: ");
+        e.lastName = Input.readText(sc, "Last Name: ");
+        e.type = Input.readEmploymentType(sc, "Employment Type (FULL_TIME/TRADITIONAL): ");
+
+        // notes: Skill level is numeric. Allow 0-9.
+        e.skillLevel = Input.readInt(sc, "Skill Level (0-9): ", 0, 9);
+
+        st.employees.add(e);
+        System.out.println("SUCCESS.");
+    }
+
+    static void editEmployee(Scanner sc, Store st) {
+        listEmployees(st);
+
+        String id = Input.readId(sc, "Employee ID: ");
+        Employee e = st.findEmployee(id);
+        if (e == null) { System.out.println("ERROR: Employee not found."); return; }
+
+        System.out.println("1) Rank");
+        System.out.println("2) First Name");
+        System.out.println("3) Last Name");
+        System.out.println("4) Employment Type");
+        System.out.println("5) Skill Level");
+
+        int f = Input.readInt(sc, "Field: ", 1, 5);
+
+        if (f == 1) e.rank = Input.readText(sc, "New Rank: ");
+        else if (f == 2) e.firstName = Input.readText(sc, "New First Name: ");
+        else if (f == 3) e.lastName = Input.readText(sc, "New Last Name: ");
+        else if (f == 4) e.type = Input.readEmploymentType(sc, "Employment Type (FULL_TIME/TRADITIONAL): ");
+        else e.skillLevel = Input.readInt(sc, "New Skill Level (0-9): ", 0, 9);
+
+        System.out.println("SUCCESS.");
+    }
+
+    static void deleteEmployee(Scanner sc, Store st) {
+        listEmployees(st);
+
+        String id = Input.readId(sc, "Employee ID: ");
+        Employee e = st.findEmployee(id);
+        if (e == null) { System.out.println("ERROR: Employee not found."); return; }
+
+        // notes: If someone is a rater for others, clear those references
+        for (Employee other : st.employees) {
+            if (other.raterEmployeeId.equalsIgnoreCase(id)) other.raterEmployeeId = "";
+        }
+
+        st.employees.remove(e);
+        System.out.println("SUCCESS.");
+    }
+
+    static void listEmployees(Store st) {
+        System.out.println("\nEMPLOYEES");
+        if (st.employees.isEmpty()) { System.out.println("(None)"); return; }
+        for (Employee e : st.employees) {
+            System.out.println(e.employeeId + " | " + e.rank + " " + e.lastName + ", " + e.firstName +
+                    " | " + e.type + " | Skill " + e.skillLevel);
+        }
+    }
+
+    // ============================================================
+    // EMPLOYEES: VIEW DETAILS
+    // ============================================================
+
+    static void viewEmployeeDetails(Scanner sc, Store st) {
+        listEmployees(st);
+
+        String id = Input.readId(sc, "Employee ID: ");
+        Employee e = st.findEmployee(id);
+        if (e == null) { System.out.println("ERROR: Employee not found."); return; }
+
+        System.out.println("\nDETAILS: " + e.employeeId);
+        System.out.println("Name: " + e.rank + " " + e.firstName + " " + e.lastName);
+        System.out.println("Type: " + e.type);
+        System.out.println("Skill: " + e.skillLevel);
+
+        if (e.raterEmployeeId.isEmpty()) {
+            System.out.println("Rater: (None)");
+        } else {
+            Employee r = st.findEmployee(e.raterEmployeeId);
+            System.out.println("Rater: " + e.raterEmployeeId +
+                    (r == null ? " (missing record)" : " (" + r.rank + " " + r.lastName + ")"));
+        }
+
+        System.out.println("\nSections:");
+        if (e.sectionIds.isEmpty()) {
+            System.out.println("(None)");
+        } else {
+            for (String sid : e.sectionIds) {
+                System.out.println(" - " + st.formatSectionChain(sid));
+            }
+        }
+
+        System.out.println("\nAdditional Duties:");
+        if (e.dutyAssignments.isEmpty()) {
+            System.out.println("(None)");
+        } else {
+            for (DutyAssign a : e.dutyAssignments) {
+                System.out.println(" - " + st.formatSectionChain(a.sectionId) + " => " + a.dutyName);
+            }
+        }
+    }
+
+    // ============================================================
+    // EMPLOYEES: SECTION MEMBERSHIP
+    // ============================================================
+
+    static void assignEmpToSection(Scanner sc, Store st) {
+        listEmployees(st);
+
+        String empId = Input.readId(sc, "Employee ID: ");
+        Employee e = st.findEmployee(empId);
+        if (e == null) { System.out.println("ERROR: Employee not found."); return; }
+
+        listSections(st);
+
+        String secId = Input.readId(sc, "Section ID: ");
+        Section sec = st.findSection(secId);
+        if (sec == null) { System.out.println("ERROR: Section not found."); return; }
+
+        if (st.containsIgnoreCase(e.sectionIds, secId)) { System.out.println("ERROR: Already assigned."); return; }
+        e.sectionIds.add(sec.sectionId);
+
+        System.out.println("SUCCESS.");
+    }
+
+    static void removeEmpFromSection(Scanner sc, Store st) {
+        listEmployees(st);
+
+        String empId = Input.readId(sc, "Employee ID: ");
+        Employee e = st.findEmployee(empId);
+        if (e == null) { System.out.println("ERROR: Employee not found."); return; }
+
+        if (e.sectionIds.isEmpty()) { System.out.println("ERROR: Employee has no sections."); return; }
+
+        System.out.println("Sections:");
+        for (String sid : e.sectionIds) System.out.println(" - " + st.formatSectionChain(sid));
+
+        String secId = Input.readId(sc, "Section ID to remove: ");
+
+        boolean removed = e.sectionIds.removeIf(sid -> sid.equalsIgnoreCase(secId));
+
+        // notes: If a section membership is removed, remove duties tied to that section
+        e.dutyAssignments.removeIf(a -> a.sectionId.equalsIgnoreCase(secId));
+
+        if (!removed) { System.out.println("ERROR: Not a member of that section."); return; }
+        System.out.println("SUCCESS.");
+    }
+
+    // ============================================================
+    // EMPLOYEES: DUTY ASSIGNMENTS
+    // ============================================================
+
+    static void assignDutyToEmployee(Scanner sc, Store st) {
+        listEmployees(st);
+
+        String empId = Input.readId(sc, "Employee ID: ");
+        Employee e = st.findEmployee(empId);
+        if (e == null) { System.out.println("ERROR: Employee not found."); return; }
+
+        if (e.sectionIds.isEmpty()) { System.out.println("ERROR: Employee has no section memberships."); return; }
+
+        System.out.println("Employee Sections:");
+        for (String sid : e.sectionIds) System.out.println(" - " + st.formatSectionChain(sid));
+
+        String secId = Input.readId(sc, "Section ID: ");
+
+        if (!st.containsIgnoreCase(e.sectionIds, secId)) { System.out.println("ERROR: Employee not in that section."); return; }
+
+        Section sec = st.findSection(secId);
+        if (sec == null) { System.out.println("ERROR: Section not found."); return; }
+
+        if (sec.dutyNames.isEmpty()) { System.out.println("ERROR: Section has no duties. Add in Duties menu."); return; }
+
+        System.out.println("Section Duties:");
+        for (int i = 0; i < sec.dutyNames.size(); i++) {
+            System.out.println((i + 1) + ") " + sec.dutyNames.get(i));
+        }
+
+        int dutyChoice = Input.readInt(sc, "Choose Duty #: ", 1, sec.dutyNames.size());
+        String dutyName = sec.dutyNames.get(dutyChoice - 1);
+
+        if (st.employeeHasDuty(e, secId, dutyName)) { System.out.println("ERROR: Already assigned."); return; }
+
+        e.dutyAssignments.add(new DutyAssign(sec.sectionId, dutyName));
+        System.out.println("SUCCESS.");
+    }
+
+    static void removeDutyFromEmployee(Scanner sc, Store st) {
+        listEmployees(st);
+
+        String empId = Input.readId(sc, "Employee ID: ");
+        Employee e = st.findEmployee(empId);
+        if (e == null) { System.out.println("ERROR: Employee not found."); return; }
+
+        if (e.dutyAssignments.isEmpty()) { System.out.println("ERROR: No duty assignments."); return; }
+
+        System.out.println("Current Assignments:");
+        for (int i = 0; i < e.dutyAssignments.size(); i++) {
+            DutyAssign a = e.dutyAssignments.get(i);
+            System.out.println((i + 1) + ") " + st.formatSectionChain(a.sectionId) + " => " + a.dutyName);
+        }
+
+        int choice = Input.readInt(sc, "Remove which assignment #: ", 1, e.dutyAssignments.size());
+        e.dutyAssignments.remove(choice - 1);
+
+        System.out.println("SUCCESS.");
+    }
+
+    // ============================================================
+    // EMPLOYEES: RATER ASSIGNMENT
+    // ============================================================
+
+    static void setRater(Scanner sc, Store st) {
+        listEmployees(st);
+
+        String empId = Input.readId(sc, "Employee ID to update: ");
+        Employee e = st.findEmployee(empId);
+        if (e == null) { System.out.println("ERROR: Employee not found."); return; }
+
+        System.out.println("Current rater: " + (e.raterEmployeeId.isEmpty() ? "(None)" : e.raterEmployeeId));
+        String raterId = Input.readOptionalId(sc, "Rater Employee ID (blank to clear): ");
+
+        if (raterId.isEmpty()) { e.raterEmployeeId = ""; System.out.println("SUCCESS."); return; }
+        if (raterId.equalsIgnoreCase(empId)) { System.out.println("ERROR: Cannot be own rater."); return; }
+        if (st.findEmployee(raterId) == null) { System.out.println("ERROR: Rater not found."); return; }
+
+        e.raterEmployeeId = raterId;
+        System.out.println("SUCCESS.");
+    }
+
+    // ============================================================
+    // DUTIES MENU: SECTION DUTY LIST MANAGEMENT
+    // ============================================================
+
+    static void viewSectionDuties(Scanner sc, Store st) {
+        listSections(st);
+
+        String secId = Input.readId(sc, "Section ID: ");
+        Section sec = st.findSection(secId);
+        if (sec == null) { System.out.println("ERROR: Section not found."); return; }
+
+        System.out.println("\nDuties for " + sec.sectionId + " (" + sec.name + ")");
+        if (sec.dutyNames.isEmpty()) System.out.println("(None)");
+        else for (String d : sec.dutyNames) System.out.println(" - " + d);
+    }
+
+    static void addDutyToSection(Scanner sc, Store st) {
+        listSections(st);
+
+        String secId = Input.readId(sc, "Section ID: ");
+        Section sec = st.findSection(secId);
+        if (sec == null) { System.out.println("ERROR: Section not found."); return; }
+
+        String duty = Input.readText(sc, "Duty Name: ");
+
+        if (duty.isEmpty()) { System.out.println("ERROR: Blank duty name."); return; }
+        if (st.sectionHasDuty(secId, duty)) { System.out.println("ERROR: Duty exists."); return; }
+
+        sec.dutyNames.add(duty);
+        System.out.println("SUCCESS.");
+    }
+
+    static void renameDutyInSection(Scanner sc, Store st) {
+        listSections(st);
+
+        String secId = Input.readId(sc, "Section ID: ");
+        Section sec = st.findSection(secId);
+        if (sec == null) { System.out.println("ERROR: Section not found."); return; }
+        if (sec.dutyNames.isEmpty()) { System.out.println("ERROR: No duties to rename."); return; }
+
+        System.out.println("Duties:");
+        for (int i = 0; i < sec.dutyNames.size(); i++) {
+            System.out.println((i + 1) + ") " + sec.dutyNames.get(i));
+        }
+
+        int oldChoice = Input.readInt(sc, "Duty # to rename: ", 1, sec.dutyNames.size());
+        String oldName = sec.dutyNames.get(oldChoice - 1);
+
+        String newName = Input.readText(sc, "New Duty Name: ");
+        if (newName.isEmpty()) { System.out.println("ERROR: Blank duty name."); return; }
+        if (st.sectionHasDuty(secId, newName)) { System.out.println("ERROR: New duty name already exists."); return; }
+
+        sec.dutyNames.set(oldChoice - 1, newName);
+
+        // notes: Rename must update employee assignments too
+        for (Employee e : st.employees) {
+            for (DutyAssign a : e.dutyAssignments) {
+                if (a.sectionId.equalsIgnoreCase(secId) && a.dutyName.equalsIgnoreCase(oldName)) {
+                    a.dutyName = newName;
+                }
+            }
+        }
+
+        System.out.println("SUCCESS.");
+    }
+
+    static void deleteDutyFromSection(Scanner sc, Store st) {
+        listSections(st);
+
+        String secId = Input.readId(sc, "Section ID: ");
+        Section sec = st.findSection(secId);
+        if (sec == null) { System.out.println("ERROR: Section not found."); return; }
+        if (sec.dutyNames.isEmpty()) { System.out.println("ERROR: No duties to delete."); return; }
+
+        System.out.println("Duties:");
+        for (int i = 0; i < sec.dutyNames.size(); i++) {
+            System.out.println((i + 1) + ") " + sec.dutyNames.get(i));
+        }
+
+        int deleteChoice = Input.readInt(sc, "Duty # to delete: ", 1, sec.dutyNames.size());
+        String duty = sec.dutyNames.get(deleteChoice - 1);
+
+        sec.dutyNames.remove(deleteChoice - 1);
+
+        // notes: Remove any employee assignments that used that duty
+        for (Employee e : st.employees) {
+            e.dutyAssignments.removeIf(a ->
+                    a.sectionId.equalsIgnoreCase(secId) && a.dutyName.equalsIgnoreCase(duty));
+        }
+
+        System.out.println("SUCCESS.");
+    }
+}
+
+/* ============================================================
+ * ENUMS
+ * ============================================================ */
+enum EmploymentType { FULL_TIME, TRADITIONAL }
+
+/* ============================================================
+ * ORGANIZATION DATA CLASSES
+ * ============================================================ */
+class Wing {
+    String wingId;
+    String name;
+    Wing(String id, String name) { this.wingId = id; this.name = name; }
+}
+
+class Group {
+    String groupId;
+    String name;
+    String wingId = "";
+    Group(String id, String name) { this.groupId = id; this.name = name; }
+}
+
+class Squadron {
+    String squadronId;
+    String name;
+    String groupId = "";
+    Squadron(String id, String name) { this.squadronId = id; this.name = name; }
+}
+
+class Section {
+    String sectionId;
+    String name;
+    String squadronId = "";
+    ArrayList<String> dutyNames = new ArrayList<>();
+    Section(String id, String name) { this.sectionId = id; this.name = name; }
+}
+
+/* ============================================================
+ * EMPLOYEE + DUTY ASSIGNMENT DATA CLASSES
+ * ============================================================ */
+class DutyAssign {
+    String sectionId;
+    String dutyName;
+    DutyAssign(String s, String d) { sectionId = s; dutyName = d; }
+}
+
+class Employee {
+    String employeeId;
+    String rank = "";
+    String firstName = "";
+    String lastName = "";
+    EmploymentType type = EmploymentType.FULL_TIME;
+    int skillLevel = 0;
+    String raterEmployeeId = "";
+    ArrayList<String> sectionIds = new ArrayList<>();
+    ArrayList<DutyAssign> dutyAssignments = new ArrayList<>();
+    Employee(String id) { employeeId = id; }
+}
+
+/* ============================================================
+ * DATA STORE + FILE STORAGE
+ * ============================================================
+ * Stores all records in memory and saves them to CSV.
+ */
+class Store {
+
+    ArrayList<Wing> wings = new ArrayList<>();
+    ArrayList<Group> groups = new ArrayList<>();
+    ArrayList<Squadron> squadrons = new ArrayList<>();
+    ArrayList<Section> sections = new ArrayList<>();
+    ArrayList<Employee> employees = new ArrayList<>();
+
+    final String WINGS = "wings.csv";
+    final String GROUPS = "groups.csv";
+    final String SQUADS = "squadrons.csv";
+    final String SECTS = "sections.csv";
+    final String EMPS = "employees.csv";
+
+    Wing findWing(String id) { for (Wing w : wings) if (w.wingId.equalsIgnoreCase(id)) return w; return null; }
+    Group findGroup(String id) { for (Group g : groups) if (g.groupId.equalsIgnoreCase(id)) return g; return null; }
+    Squadron findSquadron(String id) { for (Squadron s : squadrons) if (s.squadronId.equalsIgnoreCase(id)) return s; return null; }
+    Section findSection(String id) { for (Section s : sections) if (s.sectionId.equalsIgnoreCase(id)) return s; return null; }
+    Employee findEmployee(String id) { for (Employee e : employees) if (e.employeeId.equalsIgnoreCase(id)) return e; return null; }
+
+    boolean containsIgnoreCase(List<String> list, String value) {
+        for (String s : list) if (s.equalsIgnoreCase(value)) return true;
+        return false;
+    }
+
+    boolean sectionHasDuty(String sectionId, String dutyName) {
+        Section sec = findSection(sectionId);
+        if (sec == null) return false;
+        for (String d : sec.dutyNames) if (d.equalsIgnoreCase(dutyName)) return true;
+        return false;
+    }
+
+    boolean employeeHasDuty(Employee e, String sectionId, String dutyName) {
+        for (DutyAssign a : e.dutyAssignments) {
+            if (a.sectionId.equalsIgnoreCase(sectionId) && a.dutyName.equalsIgnoreCase(dutyName)) return true;
+        }
+        return false;
+    }
+
+    String formatSectionChain(String sectionId) {
+        Section sec = findSection(sectionId);
+        if (sec == null) return sectionId + " (missing section record)";
+
+        String squadPart = "UNASSIGNED";
+        String groupPart = "UNASSIGNED";
+        String wingPart = "UNASSIGNED";
+
+        if (!sec.squadronId.isEmpty()) {
+            Squadron sq = findSquadron(sec.squadronId);
+            if (sq != null) {
+                squadPart = sq.squadronId + " " + sq.name;
+
+                if (!sq.groupId.isEmpty()) {
+                    Group g = findGroup(sq.groupId);
+                    if (g != null) {
+                        groupPart = g.groupId + " " + g.name;
+
+                        if (!g.wingId.isEmpty()) {
+                            Wing w = findWing(g.wingId);
+                            if (w != null) wingPart = w.wingId + " " + w.name;
+                        }
+                    }
+                }
+            }
+        }
+
+        return sec.sectionId + " " + sec.name +
+                " | Sq: " + squadPart +
+                " | Gp: " + groupPart +
+                " | Wg: " + wingPart;
+    }
+
+    void loadAll() {
+        ensureFileExists(WINGS);
+        ensureFileExists(GROUPS);
+        ensureFileExists(SQUADS);
+        ensureFileExists(SECTS);
+        ensureFileExists(EMPS);
+
+        loadWings();
+        loadGroups();
+        loadSquads();
+        loadSects();
+        loadEmps();
+        reconcile();
+    }
+
+    void saveAll() {
+        saveWings();
+        saveGroups();
+        saveSquads();
+        saveSects();
+        saveEmps();
+    }
+
+    void reconcile() {
+        for (Employee e : employees) {
+            e.sectionIds.removeIf(sid -> findSection(sid) == null);
+            e.dutyAssignments.removeIf(a -> findSection(a.sectionId) == null);
+            e.dutyAssignments.removeIf(a -> !containsIgnoreCase(e.sectionIds, a.sectionId));
+            e.dutyAssignments.removeIf(a -> !sectionHasDuty(a.sectionId, a.dutyName));
+
+            if (!e.raterEmployeeId.isEmpty() && findEmployee(e.raterEmployeeId) == null) e.raterEmployeeId = "";
+            if (e.raterEmployeeId.equalsIgnoreCase(e.employeeId)) e.raterEmployeeId = "";
+        }
+    }
+
+    static String clean(String s) {
+        if (s == null) return "";
+        return s.trim()
+                .replace(",", " ")
+                .replace("|", "/")
+                .replace(":", "/");
+    }
+
+    static String joinPipe(List<String> list) {
+        if (list == null || list.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            sb.append(clean(list.get(i)));
+            if (i < list.size() - 1) sb.append("|");
+        }
+        return sb.toString();
+    }
+
+    static ArrayList<String> splitPipe(String s) {
+        ArrayList<String> out = new ArrayList<>();
+        if (s == null) return out;
+        String t = s.trim();
+        if (t.isEmpty()) return out;
+
+        String[] parts = t.split("\\|", -1);
+        for (String p : parts) {
+            String v = p.trim();
+            if (!v.isEmpty()) out.add(v);
+        }
+        return out;
+    }
+
+    static String encodeDutyAssign(List<DutyAssign> list) {
+        if (list == null || list.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            DutyAssign a = list.get(i);
+            sb.append(clean(a.sectionId)).append(":").append(clean(a.dutyName));
+            if (i < list.size() - 1) sb.append("|");
+        }
+        return sb.toString();
+    }
+
+    static ArrayList<DutyAssign> decodeDutyAssign(String s) {
+        ArrayList<DutyAssign> out = new ArrayList<>();
+        if (s == null) return out;
+        String t = s.trim();
+        if (t.isEmpty()) return out;
+
+        String[] parts = t.split("\\|", -1);
+        for (String item : parts) {
+            String x = item.trim();
+            if (x.isEmpty()) continue;
+
+            String[] kv = x.split(":", -1);
+            if (kv.length >= 2) {
+                String secId = kv[0].trim();
+                String duty = kv[1].trim();
+                if (!secId.isEmpty() && !duty.isEmpty()) out.add(new DutyAssign(secId, duty));
+            }
+        }
+        return out;
+    }
+
+    void ensureFileExists(String fileName) {
+        File f = new File(fileName);
+        if (!f.exists()) {
+            try {
+                f.createNewFile();
+            } catch (Exception ex) {
+                System.out.println("ERROR: Could not create file: " + fileName);
+            }
+        }
+    }
+
+    void loadWings() {
+        wings.clear();
+        for (String[] p : readCsv(WINGS)) {
+            if (p.length >= 2) wings.add(new Wing(p[0], p[1]));
+        }
+    }
+
+    void loadGroups() {
+        groups.clear();
+        for (String[] p : readCsv(GROUPS)) {
+            if (p.length >= 2) {
+                Group g = new Group(p[0], p[1]);
+                if (p.length >= 3) g.wingId = p[2];
+                groups.add(g);
+            }
+        }
+    }
+
+    void loadSquads() {
+        squadrons.clear();
+        for (String[] p : readCsv(SQUADS)) {
+            if (p.length >= 2) {
+                Squadron s = new Squadron(p[0], p[1]);
+                if (p.length >= 3) s.groupId = p[2];
+                squadrons.add(s);
+            }
+        }
+    }
+
+    void loadSects() {
+        sections.clear();
+        for (String[] p : readCsv(SECTS)) {
+            if (p.length >= 2) {
+                Section s = new Section(p[0], p[1]);
+                if (p.length >= 3) s.squadronId = p[2];
+                if (p.length >= 4) s.dutyNames = splitPipe(p[3]);
+                sections.add(s);
+            }
+        }
+    }
+
+    void loadEmps() {
+        employees.clear();
+        for (String[] p : readCsv(EMPS)) {
+            if (p.length >= 6) {
+                Employee e = new Employee(p[0]);
+                e.rank = p[1];
+                e.firstName = p[2];
+                e.lastName = p[3];
+
+                try { e.type = EmploymentType.valueOf(p[4]); }
+                catch (Exception ex) { e.type = EmploymentType.FULL_TIME; }
+
+                try { e.skillLevel = Integer.parseInt(p[5]); }
+                catch (Exception ex) { e.skillLevel = 0; }
+
+                if (p.length >= 7) e.raterEmployeeId = p[6];
+                if (p.length >= 8) e.sectionIds = splitPipe(p[7]);
+                if (p.length >= 9) e.dutyAssignments = decodeDutyAssign(p[8]);
+
+                employees.add(e);
+            }
+        }
+    }
+
+    void saveWings() {
+        ArrayList<String[]> rows = new ArrayList<>();
+        for (Wing w : wings) rows.add(new String[]{w.wingId, w.name});
+        writeCsv(WINGS, rows);
+    }
+
+    void saveGroups() {
+        ArrayList<String[]> rows = new ArrayList<>();
+        for (Group g : groups) rows.add(new String[]{g.groupId, g.name, g.wingId});
+        writeCsv(GROUPS, rows);
+    }
+
+    void saveSquads() {
+        ArrayList<String[]> rows = new ArrayList<>();
+        for (Squadron s : squadrons) rows.add(new String[]{s.squadronId, s.name, s.groupId});
+        writeCsv(SQUADS, rows);
+    }
+
+    void saveSects() {
+        ArrayList<String[]> rows = new ArrayList<>();
+        for (Section s : sections) rows.add(new String[]{s.sectionId, s.name, s.squadronId, joinPipe(s.dutyNames)});
+        writeCsv(SECTS, rows);
+    }
+
+    void saveEmps() {
+        ArrayList<String[]> rows = new ArrayList<>();
+        for (Employee e : employees) {
+            rows.add(new String[]{
+                    e.employeeId,
+                    e.rank,
+                    e.firstName,
+                    e.lastName,
+                    e.type.toString(),
+                    String.valueOf(e.skillLevel),
+                    e.raterEmployeeId,
+                    joinPipe(e.sectionIds),
+                    encodeDutyAssign(e.dutyAssignments)
+            });
+        }
+        writeCsv(EMPS, rows);
+    }
+
+    ArrayList<String[]> readCsv(String file) {
+        ArrayList<String[]> rows = new ArrayList<>();
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.trim().isEmpty()) continue;
+                String[] p = line.split(",", -1);
+                for (int i = 0; i < p.length; i++) p[i] = p[i].trim();
+                rows.add(p);
+            }
+        } catch (Exception ex) {
+            System.out.println("ERROR: Could not load " + file + ".");
+        }
+        return rows;
+    }
+
+    void writeCsv(String file, ArrayList<String[]> rows) {
+        ensureFileExists(file);
+
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(file))) {
+            for (String[] r : rows) {
+                for (int i = 0; i < r.length; i++) {
+                    bw.write(clean(r[i]));
+                    if (i < r.length - 1) bw.write(",");
+                }
+                bw.newLine();
+            }
+        } catch (Exception ex) {
+            System.out.println("ERROR: Could not save " + file + ".");
+        }
+    }
+}

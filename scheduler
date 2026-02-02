@@ -1787,148 +1787,91 @@ class Store {
         }
     }
 
-    boolean[] readWeeklyMask(Scanner sc) {
-        while (true) {
-            String mask = Input.readString(sc, "Workdays mask Mon..Sun (example 1111000) (blank cancels): ", true);
-            if (mask == null) return null;
-            mask = mask.trim();
-            if (mask.length() != 7) {
-                System.out.println("ERROR: Must be exactly 7 digits (Mon..Sun).");
-                continue;
-            }
-            boolean ok = true;
-            for (char ch : mask.toCharArray()) if (ch != '0' && ch != '1') ok = false;
-            if (!ok) {
-                System.out.println("ERROR: Use only 0 or 1.");
-                continue;
-            }
-            return decodeWeeklyMask(mask);
+// ============================================================
+// WEEKLY MASK INPUT (DAY NAME RANGE)
+// ============================================================
+// Converts a start day + end day into a 7-day boolean mask.
+// Example: MONDAY -> FRIDAY sets Mon/Tue/Wed/Thu/Fri to true.
+// If end day is "before" start day, it wraps across Sunday.
+// Example: FRIDAY -> MONDAY sets Fri/Sat/Sun/Mon to true.
+boolean[] readWeeklyMask(Scanner sc) {
+    while (true) {
+        String startRaw = Input.readString(sc,
+                "Start work day (e.g., MONDAY) (blank cancels): ", true);
+        if (startRaw == null) return null;
+
+        DayOfWeek startDay = parseDayOfWeek(startRaw);
+        if (startDay == null) {
+            System.out.println("ERROR: Invalid start day. Use MONDAY..SUNDAY (or Mon/Tue/etc).");
+            continue;
         }
-    }
 
-    void createSchedule(Scanner sc) {
-        String name = Input.readString(sc, "Schedule Name (blank cancels): ", true);
-        if (name == null) return;
+        String endRaw = Input.readString(sc,
+                "End work day (e.g., FRIDAY) (blank cancels): ", true);
+        if (endRaw == null) return null;
 
-        ScheduleType type = Input.readEnum(sc, "Schedule Type (WEEKLY/ROTATION) (blank cancels): ", ScheduleType.class, true);
-        if (type == null) return;
+        DayOfWeek endDay = parseDayOfWeek(endRaw);
+        if (endDay == null) {
+            System.out.println("ERROR: Invalid end day. Use MONDAY..SUNDAY (or Mon/Tue/etc).");
+            continue;
+        }
 
-        LocalTime start = Input.readTime(sc, "Start Time HH:mm (blank cancels): ", true);
-        if (start == null) return;
+        boolean[] mask = new boolean[7];
 
-        LocalTime end = Input.readTime(sc, "End Time HH:mm (blank cancels): ", true);
-        if (end == null) return;
+        int si = startDay.getValue() - 1; // Mon=0 ... Sun=6
+        int ei = endDay.getValue() - 1;
 
-        Boolean deployed = Input.readYesNo(sc, "Deployed? (Y/N) (blank cancels): ", true);
-        if (deployed == null) return;
-
-        ShiftSchedule s = new ShiftSchedule(nextScheduleId(), name);
-        s.type = type;
-        s.startTime = start;
-        s.endTime = end;
-        s.deployed = deployed;
-
-        if (type == ScheduleType.WEEKLY) {
-            boolean[] mask = readWeeklyMask(sc);
-            if (mask == null) return;
-            s.weeklyMask = mask;
+        if (si <= ei) {
+            for (int i = si; i <= ei; i++) mask[i] = true;
         } else {
-            LocalDate anchor = Input.readDate(sc, "Anchor Date yyyy-MM-dd (blank cancels): ", true);
-            if (anchor == null) return;
-
-            Integer cycle = Input.readInt(sc, "Cycle length days (example 6) (blank cancels): ", true);
-            if (cycle == null) return;
-
-            Integer onDays = Input.readInt(sc, "On days per cycle (example 2) (blank cancels): ", true);
-            if (onDays == null) return;
-
-            s.anchorDate = anchor;
-            s.cycleLengthDays = Math.max(1, cycle);
-            s.onDays = Math.max(0, Math.min(s.cycleLengthDays, onDays));
+            for (int i = si; i <= 6; i++) mask[i] = true; // start -> Sunday
+            for (int i = 0; i <= ei; i++) mask[i] = true;  // Monday -> end
         }
 
-        shiftSchedules.add(s);
-        System.out.println("SUCCESS: Created " + s.scheduleId);
+        System.out.println("Workdays set to: " + maskPreview(mask));
+        return mask;
     }
+}
 
-    void editSchedule(Scanner sc) {
-        listSchedules();
-        String id = Input.readString(sc, "Schedule ID (blank cancels): ", true);
-        if (id == null) return;
+// ============================================================
+// DAY PARSER
+// ============================================================
+// Accepts: MONDAY, Monday, mon, Mon., THURS, Thu, etc.
+DayOfWeek parseDayOfWeek(String raw) {
+    if (raw == null) return null;
 
-        ShiftSchedule s = findShiftSchedule(id);
-        if (s == null) { System.out.println("ERROR: Not found."); return; }
+    String t = raw.trim().toUpperCase();
+    if (t.isEmpty()) return null;
 
-        while (true) {
-            System.out.println("\nEdit Schedule: " + s.scheduleId + " | " + s.name);
-            System.out.println("1) Name");
-            System.out.println("2) Type");
-            System.out.println("3) Start Time");
-            System.out.println("4) End Time");
-            System.out.println("5) Weekly Mask (if WEEKLY)");
-            System.out.println("6) Rotation Settings (if ROTATION)");
-            System.out.println("7) Deployed Flag");
-            System.out.println("8) Back");
+    t = t.replace(".", "");
 
-            Integer c = Input.readInt(sc, "Choice: ", true);
-            if (c == null) continue;
+    if (t.startsWith("MON")) return DayOfWeek.MONDAY;
+    if (t.startsWith("TUE")) return DayOfWeek.TUESDAY;
+    if (t.startsWith("WED")) return DayOfWeek.WEDNESDAY;
+    if (t.startsWith("THU")) return DayOfWeek.THURSDAY;   // THU, THUR, THURS, THURSDAY
+    if (t.startsWith("FRI")) return DayOfWeek.FRIDAY;
+    if (t.startsWith("SAT")) return DayOfWeek.SATURDAY;
+    if (t.startsWith("SUN")) return DayOfWeek.SUNDAY;
 
-            if (c == 1) {
-                String v = Input.readString(sc, "New Name (blank cancels): ", true);
-                if (v != null) s.name = v;
-            } else if (c == 2) {
-                ScheduleType t = Input.readEnum(sc, "Schedule Type (WEEKLY/ROTATION) (blank cancels): ", ScheduleType.class, true);
-                if (t != null) s.type = t;
-            } else if (c == 3) {
-                LocalTime v = Input.readTime(sc, "New Start Time HH:mm (blank cancels): ", true);
-                if (v != null) s.startTime = v;
-            } else if (c == 4) {
-                LocalTime v = Input.readTime(sc, "New End Time HH:mm (blank cancels): ", true);
-                if (v != null) s.endTime = v;
-            } else if (c == 5) {
-                if (s.type != ScheduleType.WEEKLY) { System.out.println("ERROR: Not a WEEKLY schedule."); continue; }
-                boolean[] v = readWeeklyMask(sc);
-                if (v != null) s.weeklyMask = v;
-            } else if (c == 6) {
-                if (s.type != ScheduleType.ROTATION) { System.out.println("ERROR: Not a ROTATION schedule."); continue; }
-                LocalDate anchor = Input.readDate(sc, "New Anchor Date yyyy-MM-dd (blank cancels): ", true);
-                if (anchor == null) continue;
+    return null;
+}
 
-                Integer cycle = Input.readInt(sc, "New Cycle length days (blank cancels): ", true);
-                if (cycle == null) continue;
-
-                Integer onDays = Input.readInt(sc, "New On days per cycle (blank cancels): ", true);
-                if (onDays == null) continue;
-
-                s.anchorDate = anchor;
-                s.cycleLengthDays = Math.max(1, cycle);
-                s.onDays = Math.max(0, Math.min(s.cycleLengthDays, onDays));
-            } else if (c == 7) {
-                Boolean v = Input.readYesNo(sc, "Deployed? (Y/N) (blank cancels): ", true);
-                if (v != null) s.deployed = v;
-            } else if (c == 8) {
-                return;
-            } else {
-                System.out.println("ERROR: Invalid choice.");
-            }
+// ============================================================
+// MASK PREVIEW
+// ============================================================
+// Turns the boolean mask into a readable list of days.
+String maskPreview(boolean[] mask) {
+    String[] names = {"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"};
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < 7; i++) {
+        if (mask != null && mask.length == 7 && mask[i]) {
+            if (sb.length() > 0) sb.append(" ");
+            sb.append(names[i]);
         }
     }
+    return sb.length() == 0 ? "(none)" : sb.toString();
+}
 
-    void deleteSchedule(Scanner sc) {
-        listSchedules();
-        String id = Input.readString(sc, "Schedule ID (blank cancels): ", true);
-        if (id == null) return;
-
-        ShiftSchedule s = findShiftSchedule(id);
-        if (s == null) { System.out.println("ERROR: Not found."); return; }
-
-        for (ShiftTeam t : shiftTeams) {
-            if (t.scheduleId.equalsIgnoreCase(id)) t.scheduleId = "";
-        }
-
-        shiftSchedules.remove(s);
-        System.out.println("SUCCESS: Deleted. Teams referencing it were unassigned.");
-    }
 
     // ============================================================
     // ============================================================
